@@ -1,0 +1,90 @@
+name: Tunnel AAR
+
+# Builds tunnel/build/outputs/aar/awg-tunnel-<variant>.aar and publishes it as a workflow artifact.
+#
+# Why this exists: the tunnel module's native half (Go libwg-go.so + C libwg.so/libwg-quick.so) needs
+# a POSIX toolchain — cc, make, uname, flock, sha256sum — plus a Go toolchain and CMake. A Windows
+# development box has none of that, so downstream consumers link a prebuilt AAR instead of building
+# this module. Without a reproducible builder, "prebuilt" means "whatever someone once produced on
+# their own machine", which is exactly what a fork carrying source patches must not rely on.
+#
+# The existing build.yml builds the sample :ui application; this builds the library on its own, which
+# is the artifact a consumer actually needs and which builds in about half the time.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Build variant"
+        type: choice
+        required: true
+        default: debug
+        options:
+        - debug
+        - release
+      ref:
+        description: "Git ref (branch/tag/sha)"
+        required: false
+        default: "freesky"
+
+jobs:
+  build:
+    name: "tunnel AAR (${{ inputs.variant }})"
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    # No setup-go step on purpose: tunnel/tools/libwg-go/Makefile downloads and hash-checks its own
+    # pinned Go toolchain into the Gradle cache, and a Go on PATH would not be the one it uses.
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install NDK and CMake
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Versions come from settings.gradle.kts (ndkVersion) and the AGP default CMake.
+        sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Build
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x ./gradlew
+        VARIANT="${{ inputs.variant }}"
+        TASK="assemble$(tr '[:lower:]' '[:upper:]' <<< "${VARIANT:0:1}")${VARIANT:1}"
+        ./gradlew --no-daemon --stacktrace ":tunnel:${TASK}"
+
+    - name: Report provenance
+      shell: bash
+      run: |
+        set -euo pipefail
+        AAR="tunnel/build/outputs/aar/awg-tunnel-${{ inputs.variant }}.aar"
+        ls -l "${AAR}"
+        sha256sum "${AAR}"
+        echo "commit: $(git rev-parse HEAD)"
+        echo "describe: $(git describe --tags --always)"
+        unzip -l "${AAR}" | grep -E '\.so$' || true
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: awg-tunnel-${{ inputs.variant }}-aar
+        path: tunnel/build/outputs/aar/awg-tunnel-${{ inputs.variant }}.aar
+        if-no-files-found: error
