@@ -26,6 +26,14 @@ on:
         description: "Git ref (branch/tag/sha)"
         required: false
         default: "freesky"
+      package_name:
+        # Drives both the library namespace and -DANDROID_PACKAGE_NAME in the native build, which is
+        # where the wg tools look for their runtime state. A consumer that builds this module inside
+        # its own project overrides amneziawgPackageName there, so an AAR built with the default
+        # would not match the one that project produces itself.
+        description: "amneziawgPackageName (library namespace / native package)"
+        required: false
+        default: "org.amnezia.awg"
 
 jobs:
   build:
@@ -69,7 +77,10 @@ jobs:
         chmod +x ./gradlew
         VARIANT="${{ inputs.variant }}"
         TASK="assemble$(tr '[:lower:]' '[:upper:]' <<< "${VARIANT:0:1}")${VARIANT:1}"
-        ./gradlew --no-daemon --stacktrace ":tunnel:${TASK}"
+        ./gradlew --no-daemon --stacktrace \
+          "-PamneziawgPackageName=${{ inputs.package_name }}" \
+          "-PANDROID_PACKAGE_NAME=${{ inputs.package_name }}" \
+          ":tunnel:${TASK}"
 
     - name: Report provenance
       id: aar
