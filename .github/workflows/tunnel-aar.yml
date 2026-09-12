@@ -72,19 +72,24 @@ jobs:
         ./gradlew --no-daemon --stacktrace ":tunnel:${TASK}"
 
     - name: Report provenance
+      id: aar
       shell: bash
       run: |
         set -euo pipefail
-        AAR="tunnel/build/outputs/aar/awg-tunnel-${{ inputs.variant }}.aar"
+        # The AAR is named after the Gradle project, which consumers rename when they include this
+        # directory as a project of their own — so find it rather than assuming a name.
+        AAR="$(find tunnel/build/outputs/aar -name "*-${{ inputs.variant }}.aar" | head -n1)"
+        [[ -n "${AAR}" ]] || { echo "no ${{ inputs.variant }} AAR was produced" >&2; exit 1; }
         ls -l "${AAR}"
         sha256sum "${AAR}"
         echo "commit: $(git rev-parse HEAD)"
         echo "describe: $(git describe --tags --always)"
         unzip -l "${AAR}" | grep -E '\.so$' || true
+        echo "path=${AAR}" >> "$GITHUB_OUTPUT"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: awg-tunnel-${{ inputs.variant }}-aar
-        path: tunnel/build/outputs/aar/awg-tunnel-${{ inputs.variant }}.aar
+        path: ${{ steps.aar.outputs.path }}
         if-no-files-found: error
