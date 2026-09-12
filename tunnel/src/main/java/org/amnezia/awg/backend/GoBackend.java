@@ -7,6 +7,7 @@ package org.amnezia.awg.backend;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.IpPrefix;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.system.OsConstants;
@@ -24,6 +25,7 @@ import org.amnezia.awg.crypto.KeyFormatException;
 import org.amnezia.awg.util.NonNullForAll;
 
 import java.net.InetAddress;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -48,6 +50,8 @@ public final class GoBackend implements Backend {
     @Nullable private static AlwaysOnCallback alwaysOnCallback;
     private static GhettoCompletableFuture<VpnService> vpnService = new GhettoCompletableFuture<>();
     private final Context context;
+    /** Destinations excluded from the tunnel; empty unless {@link #setExcludedRoutes} says otherwise. */
+    private Collection<InetNetwork> excludedRoutes = Collections.emptySet();
     @Nullable private Config currentConfig;
     @Nullable private Tunnel currentTunnel;
     private int currentTunnelHandle = -1;
@@ -75,6 +79,28 @@ public final class GoBackend implements Backend {
     }
 
 
+
+    /**
+     * Set destinations that must be kept OUT of the tunnel, in addition to whatever the config's
+     * {@code AllowedIPs} already imply. Applied at the next {@code UP} transition; passing an empty
+     * collection (the default) restores plain behaviour.
+     *
+     * <p>Split routing on this backend can otherwise only be expressed as {@code AllowedIPs}, which
+     * means describing the complement of the set you want to leave out. For a real-world bypass list
+     * that complement runs to tens of thousands of routes and does not fit in the parcel that carries
+     * the tunnel configuration to the system, so the tunnel never comes up. Excluding the set
+     * directly needs a fraction of the entries, because it is the set itself rather than everything
+     * else.
+     *
+     * <p>Requires Android 13, where {@link android.net.VpnService.Builder#excludeRoute} was added;
+     * on older releases the exclusions are silently ignored and the tunnel carries everything, which
+     * is the same result as not calling this at all.
+     *
+     * @param excludedRoutes networks to route around the tunnel, or null/empty for none.
+     */
+    public void setExcludedRoutes(@Nullable final Collection<InetNetwork> excludedRoutes) {
+        this.excludedRoutes = excludedRoutes == null ? Collections.emptySet() : excludedRoutes;
+    }
 
     /**
      * Method to get the names of running tunnels.
@@ -398,6 +424,15 @@ public final class GoBackend implements Backend {
                         sawDefaultRoute = true;
                     builder.addRoute(addr.getAddress(), addr.getMask());
                 }
+            }
+
+            // Exclusions are installed as "throw" routes, so they lose to nothing and win over the
+            // default route above by being more specific: those destinations fall back to the
+            // physical network while everything else stays in the tunnel. Order against addRoute
+            // does not matter — the kernel resolves both by longest prefix.
+            if (!excludedRoutes.isEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                for (final InetNetwork excluded : excludedRoutes)
+                    builder.excludeRoute(new IpPrefix(excluded.getAddress(), excluded.getMask()));
             }
 
             // "Kill-switch" semantics
