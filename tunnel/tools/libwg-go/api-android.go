@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
@@ -250,6 +251,59 @@ func awgRequestHandshake(tunnelHandle int32) int32 {
 		}
 	}
 	return asked
+}
+
+// awgSetPeerEndpoint points every peer of the running tunnel at a new endpoint, without
+// rebuilding the TUN or touching keys, addresses or the session the server holds. Returns the
+// number of peers updated, -1 if the handle is unknown or the device cannot be read or refuses the
+// change, -2 if the endpoint is not a numeric "ip:port".
+//
+// Meant for a server that listens on several UDP ports for the same interface: when an operator
+// cuts one port, moving to another is a property of the packets, not of the session, so it needs
+// neither a new peer nor a new tunnel. The caller resolves hostnames first (the Java side does,
+// exactly as it does for the config's own Endpoint): the device's bind parses only numeric
+// endpoints, and resolving here would put DNS on a code path that runs while the tunnel is stuck.
+//
+// Deliberately narrow rather than a general IpcSet export: the UAPI text is assembled here, from a
+// parsed address and keys the device itself reported, so nothing the caller passes can inject a
+// line of its own. update_only keeps a key that vanished in between from being created as a peer.
+//
+//export awgSetPeerEndpoint
+func awgSetPeerEndpoint(tunnelHandle int32, endpoint string) int32 {
+	handle, ok := tunnelHandles[tunnelHandle]
+	if !ok {
+		return -1
+	}
+	addrPort, err := netip.ParseAddrPort(endpoint)
+	if err != nil || !addrPort.IsValid() || addrPort.Port() == 0 {
+		return -2
+	}
+	settings, err := handle.device.IpcGet()
+	if err != nil {
+		return -1
+	}
+	var request strings.Builder
+	var peers int32
+	for _, line := range strings.Split(settings, "\n") {
+		hexKey, found := strings.CutPrefix(line, "public_key=")
+		if !found {
+			continue
+		}
+		var key device.NoisePublicKey
+		if key.FromHex(hexKey) != nil {
+			continue
+		}
+		// Re-encoded from the parsed key rather than copied: the line goes back into the device.
+		fmt.Fprintf(&request, "public_key=%x\nupdate_only=true\nendpoint=%s\n", key[:], addrPort.String())
+		peers++
+	}
+	if peers == 0 {
+		return 0
+	}
+	if handle.device.IpcSet(request.String()) != nil {
+		return -1
+	}
+	return peers
 }
 
 //export awgVersion

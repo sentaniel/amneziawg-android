@@ -19,6 +19,7 @@ import org.amnezia.awg.util.SharedLibraryLoader;
 import org.amnezia.awg.config.Config;
 import org.amnezia.awg.config.InetEndpoint;
 import org.amnezia.awg.config.InetNetwork;
+import org.amnezia.awg.config.ParseException;
 import org.amnezia.awg.config.Peer;
 import org.amnezia.awg.crypto.Key;
 import org.amnezia.awg.crypto.KeyFormatException;
@@ -219,6 +220,43 @@ public final class GoBackend implements Backend {
         if (tunnel != currentTunnel || currentTunnelHandle == -1)
             return false;
         return awgRequestHandshake(currentTunnelHandle) > 0;
+    }
+
+    /**
+     * Point the peers of a running {@link Tunnel} at another endpoint, without rebuilding the TUN.
+     *
+     * <p>Meant for a server that listens on several UDP ports for the same interface. When an
+     * operator cuts the port in use, the cure is a different port, not a different session: keys,
+     * addresses and the peer on the server stay exactly as they are, because the server accepts its
+     * peer from any source address. Rebuilding the tunnel for that would cost a TUN teardown and the
+     * window in which traffic leaks around it.
+     *
+     * <p>The host is resolved here the same way the config's own {@code Endpoint} is resolved before
+     * the tunnel comes up, since the native layer accepts only a numeric {@code ip:port}. That may
+     * perform network I/O, so this must not be called from the main thread. The next handshake goes
+     * out on the new endpoint; a caller in a hurry follows up with {@link #requestHandshake}.
+     *
+     * <p>Guarded like {@link #getStatistics}: only the tunnel that is currently up is touched. The
+     * change lives in the running device only — the {@link Config} this backend holds keeps the old
+     * endpoint, so a caller that may restart the tunnel later must start it from a config of its own.
+     *
+     * @param tunnel   The tunnel whose peers should move.
+     * @param endpoint The new endpoint, {@code host:port} ({@code [v6]:port} for IPv6).
+     * @return true if at least one peer was moved; false if the tunnel is not the one currently up,
+     * the endpoint does not parse or resolve, or the native layer refused the change.
+     */
+    public boolean switchEndpoint(final Tunnel tunnel, final String endpoint) {
+        if (tunnel != currentTunnel || currentTunnelHandle == -1)
+            return false;
+        final InetEndpoint resolved;
+        try {
+            resolved = InetEndpoint.parse(endpoint).getResolved().orElse(null);
+        } catch (final ParseException e) {
+            return false;
+        }
+        if (resolved == null)
+            return false;
+        return awgSetPeerEndpoint(currentTunnelHandle, resolved.toString()) > 0;
     }
 
 

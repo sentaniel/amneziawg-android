@@ -14,6 +14,7 @@ extern int awgGetSocketV4(int handle);
 extern int awgGetSocketV6(int handle);
 extern char *awgGetConfig(int handle);
 extern int awgRequestHandshake(int handle);
+extern int awgSetPeerEndpoint(int handle, struct go_string endpoint);
 extern char *awgVersion();
 
 JNIEXPORT jint JNICALL Java_org_amnezia_awg_GoBackend_awgTurnOn(JNIEnv *env, jclass c, jstring ifname, jint tun_fd, jstring settings)
@@ -63,6 +64,18 @@ JNIEXPORT jstring JNICALL Java_org_amnezia_awg_GoBackend_awgGetConfig(JNIEnv *en
 JNIEXPORT jint JNICALL Java_org_amnezia_awg_GoBackend_awgRequestHandshake(JNIEnv *env, jclass c, jint handle)
 {
 	return awgRequestHandshake(handle);
+}
+
+JNIEXPORT jint JNICALL Java_org_amnezia_awg_GoBackend_awgSetPeerEndpoint(JNIEnv *env, jclass c, jint handle, jstring endpoint)
+{
+	const char *endpoint_str = (*env)->GetStringUTFChars(env, endpoint, 0);
+	size_t endpoint_len = (*env)->GetStringUTFLength(env, endpoint);
+	int ret = awgSetPeerEndpoint(handle, (struct go_string){
+		.str = endpoint_str,
+		.n = endpoint_len
+	});
+	(*env)->ReleaseStringUTFChars(env, endpoint, endpoint_str);
+	return ret;
 }
 
 JNIEXPORT jstring JNICALL Java_org_amnezia_awg_GoBackend_awgVersion(JNIEnv *env, jclass c)
