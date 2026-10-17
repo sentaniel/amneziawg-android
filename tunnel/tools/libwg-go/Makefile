@@ -19,13 +19,17 @@ export CGO_LDFLAGS := $(CLANG_FLAGS) $(patsubst -Wl$(comma)--build-id=%,-Wl$(com
 export GOARCH := $(NDK_GO_ARCH_MAP_$(ANDROID_ARCH_NAME))
 export GOOS := android
 export CGO_ENABLED := 1
+# Never let the go command fetch a different toolchain on its own: one it downloads would not
+# carry goruntime-boottime-over-monotonic.diff, and the timers would stop counting device sleep.
+# go.mod says which version is needed; GO_VERSION below must satisfy it, or the build fails loudly.
+export GOTOOLCHAIN := local
 
-GO_VERSION := 1.24.2
+GO_VERSION := 1.25.14
 GO_PLATFORM := $(shell uname -s | tr '[:upper:]' '[:lower:]')-$(NDK_GO_ARCH_MAP_$(shell uname -m))
 GO_TARBALL := go$(GO_VERSION).$(GO_PLATFORM).tar.gz
-GO_HASH_darwin-amd64 := 238d9c065d09ff6af229d2e3b8b5e85e688318d69f4006fb85a96e41c216ea83
-GO_HASH_darwin-arm64 := b70f8b3c5b4ccb0ad4ffa5ee91cd38075df20fdbd953a1daedd47f50fbcff47a
-GO_HASH_linux-amd64 := 68097bd680839cbc9d464a0edce4f7c333975e27a90246890e9f1078c7e702ad
+GO_HASH_darwin-amd64 := b09087a67d5792a8b0fcbf74212d62560c94ac8a8fd750ff920d8cb5f1e20118
+GO_HASH_darwin-arm64 := 5b26c0b6f308240fca2614fb02f622cfcc8c0cc3b69c78bba4845489a4590259
+GO_HASH_linux-amd64 := a21ae5633a269bcd7e90cf767e48225633795e99d831742cbf3397064fee7712
 
 default: $(DESTDIR)/libwg-go.so
 
@@ -47,6 +51,6 @@ $(BUILDDIR)/go-$(GO_VERSION)/.prepared: $(GRADLE_USER_HOME)/caches/golang/$(GO_T
 
 $(DESTDIR)/libwg-go.so: export PATH := $(BUILDDIR)/go-$(GO_VERSION)/bin/:$(PATH)
 $(DESTDIR)/libwg-go.so: $(BUILDDIR)/go-$(GO_VERSION)/.prepared go.mod
-	go build -tags linux -ldflags="-X github.com/amnezia-vpn/amneziawg-go/ipc.socketDirectory=/data/data/$(ANDROID_PACKAGE_NAME)/cache/amneziawg -buildid=" -v -trimpath -buildvcs=false -o "$@" -buildmode c-shared
+	go build -tags linux -ldflags="-X github.com/amnezia-vpn/amneziawg-go/v3/ipc.socketDirectory=/data/data/$(ANDROID_PACKAGE_NAME)/cache/amneziawg -buildid=" -v -trimpath -buildvcs=false -o "$@" -buildmode c-shared
 
 .DELETE_ON_ERROR:
