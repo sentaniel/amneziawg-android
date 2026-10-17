@@ -10,6 +10,8 @@ public class GoBackend {
 
     public static native int awgGetSocketV6(int handle);
 
+    public static native int awgRequestHandshake(int handle);
+
     public static native void awgTurnOff(int handle);
 
     public static native int awgTurnOn(String ifName, int tunFd, String settings);

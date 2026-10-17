@@ -206,6 +206,52 @@ func awgGetConfig(tunnelHandle int32) *C.char {
 	return C.CString(settings)
 }
 
+// awgRequestHandshake asks every peer of the tunnel to start a new handshake now, instead of
+// waiting for the device's own timers to notice that the session went quiet (KeepaliveTimeout plus
+// RekeyTimeout, ~15 s). Returns the number of peers asked, or -1 if the handle is unknown or the
+// device cannot be read.
+//
+// The current keypair is deliberately left alone: a caller that only suspects a stall must not
+// cost a live tunnel a single packet, and a successful handshake replaces the keypair anyway.
+// SendHandshakeInitiation rate-limits itself to once per RekeyTimeout, so calling this often is
+// harmless — a call inside that window is a silent no-op, which is also why the result counts
+// peers asked rather than handshakes sent.
+//
+//export awgRequestHandshake
+func awgRequestHandshake(tunnelHandle int32) int32 {
+	handle, ok := tunnelHandles[tunnelHandle]
+	if !ok {
+		return -1
+	}
+	// The peer set is not exposed directly; the UAPI dump is the supported way to enumerate it,
+	// and it is what getStatistics already parses on the Java side.
+	settings, err := handle.device.IpcGet()
+	if err != nil {
+		return -1
+	}
+	var asked int32
+	for _, line := range strings.Split(settings, "\n") {
+		hexKey, found := strings.CutPrefix(line, "public_key=")
+		if !found {
+			continue
+		}
+		var key device.NoisePublicKey
+		if key.FromHex(hexKey) != nil {
+			continue
+		}
+		peer := handle.device.LookupPeer(key)
+		if peer == nil {
+			continue
+		}
+		// isRetry=false resets the attempt counter, so this counts as a fresh handshake rather
+		// than as one more retry towards the device giving up on the peer.
+		if peer.SendHandshakeInitiation(false) == nil {
+			asked++
+		}
+	}
+	return asked
+}
+
 //export awgVersion
 func awgVersion() *C.char {
 	info, ok := debug.ReadBuildInfo()

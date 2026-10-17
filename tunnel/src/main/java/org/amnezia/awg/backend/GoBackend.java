@@ -197,6 +197,30 @@ public final class GoBackend implements Backend {
         return stats;
     }
 
+    /**
+     * Ask the peers of a running {@link Tunnel} to start a new handshake now, instead of waiting for
+     * amneziawg-go's own timers to notice that the session went quiet (keepalive timeout plus rekey
+     * timeout, about 15 seconds after the last data was sent).
+     *
+     * <p>Meant for a caller that watches the transfer counters and suspects a stall: a stale NAT
+     * mapping, a peer re-added on the server with a fresh session, or a flow throttled after its
+     * handshake are all cured by a new handshake, and the sooner it goes out the shorter the outage.
+     * The current keypair is not discarded, so a false suspicion costs a live tunnel nothing — a
+     * successful handshake replaces the keypair anyway. amneziawg-go rate-limits initiations to one
+     * per rekey timeout, so calling this often is harmless; a call inside that window is a no-op.
+     *
+     * <p>Guarded like {@link #getStatistics}: only the tunnel that is currently up is touched.
+     *
+     * @param tunnel The tunnel whose peers should handshake.
+     * @return true if at least one peer was asked; false if the tunnel is not the one currently up,
+     * has no peers, or the native layer could not be read.
+     */
+    public boolean requestHandshake(final Tunnel tunnel) {
+        if (tunnel != currentTunnel || currentTunnelHandle == -1)
+            return false;
+        return awgRequestHandshake(currentTunnelHandle) > 0;
+    }
+
 
     /**
      * Get the last handshake time for a given {@link Tunnel}.
