@@ -57,15 +57,20 @@ jobs:
     # No setup-go step on purpose: tunnel/tools/libwg-go/Makefile downloads and hash-checks its own
     # pinned Go toolchain into the Gradle cache, and a Go on PATH would not be the one it uses.
 
+    # packages: '' because the action's default is "tools platform-tools", and Google's repository no
+    # longer carries `tools`: since mid-September 2026 the step failed with "Failed to find package
+    # 'tools'" before Gradle ever ran. platform-tools moves to the install step below.
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        packages: ''
 
     - name: Install NDK and CMake
       shell: bash
       run: |
         set -euo pipefail
         # Versions come from settings.gradle.kts (ndkVersion) and the AGP default CMake.
-        sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
+        sdkmanager --install "platform-tools" "ndk;26.1.10909125" "cmake;3.22.1"
 
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v4
